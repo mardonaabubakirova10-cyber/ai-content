@@ -1,0 +1,21 @@
+{
+  "name": "ai-content-studio",
+  "version": "1.0.0",
+  "description": "AI Content Studio — генератор контента для соцсетей с Gemini",
+  "main": "app.js",
+  "scripts": {
+    "dev": "http-server . -p 3000 -c-1",
+    "start": "http-server . -p 3000"
+  },
+  "keywords": [
+    "ai",
+    "gemini",
+    "content",
+    "social-media"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}
