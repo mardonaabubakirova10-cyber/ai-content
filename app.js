@@ -72,14 +72,11 @@ function init() {
   // Сначала берём сохранённый ключ из localStorage, если его нет — из config.js
   state.apiKey = storedKey || configKey;
 
-  if (state.apiKey) {
-    dom.apiKeyModal?.setAttribute('hidden', '');
-    if (dom.apiKeyInput) {
-      dom.apiKeyInput.value = state.apiKey;
-    }
-  } else {
-    dom.apiKeyModal?.removeAttribute('hidden');
+  if (state.apiKey && dom.apiKeyInput) {
+    dom.apiKeyInput.value = state.apiKey;
   }
+  // Не блокируем экран модальным окном по умолчанию (так как на Vercel работает серверный API)
+  dom.apiKeyModal?.setAttribute('hidden', '');
 
   // Appearance
   const savedAppearance = localStorage.getItem('ai_appearance') || 'dark';
@@ -328,11 +325,6 @@ async function handleGenerate() {
     return;
   }
 
-  if (!state.apiKey) {
-    dom.apiKeyModal?.removeAttribute('hidden');
-    return;
-  }
-
   if (state.isGenerating) return;
 
   state.isGenerating = true;
@@ -378,68 +370,45 @@ function clearVariantDisplays() {
   }
 }
 
-// ── Prompt Builder (Unified for 3 variants) ────────────────
-function buildUnifiedPrompt(topic) {
-  const platforms = {
-    telegram: 'Telegram-канал (до 4096 символов, аккуратное форматирование)',
-    youtube: 'YouTube (описание к видео, 300-500 слов, ключевые теги)',
-    instagram: 'Instagram (до 2200 символов, эмодзи и хэштэги для охвата)'
-  };
-
-  const tones = {
-    engaging: 'ВОВЛЕКАЮЩИЙ — активный диалог с читателем, провокационные/открытые вопросы, создание интриги, интерактив (опросы, обсуждение в комментариях), эмоциональная подача.',
-    professional: 'ДЕЛОВОЙ / ЭКСПЕРТНЫЙ — строгий, авторитетный и структурированный тон. Факты, конкретные цифры, логика, профессиональная терминология без лишней "воды" и без панибратства.',
-    casual: 'ЛЁГКИЙ / ДРУЖЕСКИЙ — тёплый, разговорный стиль, самоирония, понятный язык "на пальцах", ощущение личной беседы за кофе, уместные эмодзи.',
-    selling: 'ПРОДАЮЩИЙ — мощный акцент на триггерах (боли, выгода, оффер, снятие возражений, ограничение по времени), четкое позиционирование ценности и сильный призыв к покупке/заявке (CTA).'
-  };
-
-  return `Ты профессиональный SMM-копирайтер высшего уровня.
-Твоя задача — создать ровно 3 РАЗНЫХ по формату варианта поста для платформы ${platforms[state.platform]}.
-
-Тема поста: "${topic}"
-
-ГЛАВНОЕ ТРЕБОВАНИЕ К СТИЛЮ И ТОНУ:
-Весь текст ОБЯЗАН быть строго выдержан в выбранной тональности:
-→ ${tones[state.tone]}
-Все 3 варианта должны явно отражать именно эту тональность (${state.tone}) по своему словарному запасу, подаче и эмоциональной окраске.
-
-Структура трех вариантов:
-- Вариант 1 (индекс 0): Формат "Боль аудитории → Решение проблемы → Конкретный результат" (в заданной тональности).
-- Вариант 2 (индекс 1): Формат "Ключевые тезисы, инсайты и практический чек-лист" (в заданной тональности).
-- Вариант 3 (индекс 2): Формат "Сторителлинг / жизненная ситуация / яркий кейс" (в заданной тональности).
-
-Верни СТРОГО JSON со следующей структурой:
-{
-  "variants": [
-    {
-      "title": "Цепляющий заголовок варианта 1",
-      "body": "Текст поста варианта 1 с переносами строк (\\\\n). Объем: ${state.platform === 'youtube' ? '300-500' : '200-400'} символов.",
-      "cta": "Призыв к действию",
-      "hashtags": "${state.platform === 'instagram' ? '15-20 хэштэгов' : state.platform === 'youtube' ? '3-5 тегов' : '5-10 хэштэгов'}",
-      "imagePrompt": "Detailed English image generation prompt for Midjourney/DALL-E. Minimalist, premium, photography/cinematic style, ~60 words."
-    },
-    {
-      "title": "Цепляющий заголовок варианта 2",
-      "body": "Текст поста варианта 2 с переносами строк (\\\\n).",
-      "cta": "Призыв к действию",
-      "hashtags": "${state.platform === 'instagram' ? '15-20 хэштэгов' : state.platform === 'youtube' ? '3-5 тегов' : '5-10 хэштэгов'}",
-      "imagePrompt": "Detailed English image generation prompt for Midjourney/DALL-E."
-    },
-    {
-      "title": "Цепляющий заголовок варианта 3",
-      "body": "Текст поста варианта 3 с переносами строк (\\\\n).",
-      "cta": "Призыв к действию",
-      "hashtags": "${state.platform === 'instagram' ? '15-20 хэштэгов' : state.platform === 'youtube' ? '3-5 тегов' : '5-10 хэштэгов'}",
-      "imagePrompt": "Detailed English image generation prompt for Midjourney/DALL-E."
-    }
-  ]
-}
-
-Пиши текст поста на русском языке, кроме imagePrompt (он строго на английском). Только чистый JSON без каких-либо markdown-тегов.`;
-}
-
 // ── Unified Generation (1 Request for all 3 variants) ──────
 async function generateAllVariants(topic) {
+  // 1. Если на Vercel (или локально) нет клиентского ключа, вызываем защищенный серверный эндпоинт /api/generate
+  if (!state.apiKey) {
+    showCursor(state.activeVariant);
+    try {
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic,
+          platform: state.platform,
+          tone: state.tone
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        if (res.status === 500 && (data?.error || '').includes('GEMINI_API_KEY')) {
+          dom.apiKeyModal?.removeAttribute('hidden');
+          throw new Error('Ключ API не настроен на сервере Vercel. Введите ключ вручную.');
+        }
+        throw new Error(data?.error || `Сервер вернул ошибку ${res.status}`);
+      }
+
+      if (data?.variants && Array.isArray(data.variants)) {
+        removeCursor(state.activeVariant);
+        applyVariants(data.variants);
+        return;
+      }
+      throw new Error('Некорректный формат ответа от сервера.');
+    } catch (e) {
+      removeCursor(state.activeVariant);
+      throw e;
+    }
+  }
+
+  // 2. Если пользователь явно ввел свой ключ в браузере, используем прямой клиентский запрос к Gemini
   let lastError = null;
   const models = await getAvailableModels(state.apiKey);
 
@@ -451,7 +420,6 @@ async function generateAllVariants(topic) {
       console.warn(`Model ${model} failed:`, err.message);
       lastError = err;
       if (/429|quota|rate/i.test(err.message)) {
-        // Небольшая задержка перед переходом к запасной модели
         await new Promise(r => setTimeout(r, 1200));
       }
     }
@@ -939,4 +907,4 @@ function showToast(msg, type = 'info') {
 }
 
 // ── Boot ────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', init);// TEST
